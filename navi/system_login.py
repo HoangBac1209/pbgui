@@ -22,59 +22,38 @@ def change_password():
             submit_button = st.form_submit_button("Update Password", help=pbgui_help.change_password)
 
         if submit_button:
-            # Retrieve the current password from secrets, default to empty string if not set
             stored_password = st.secrets.get("password", "")
-
-            # Verify current password
             if current_password != stored_password:
                 st.error("Current password is incorrect.")
                 return
-
-            # Check if new passwords match
             if new_password != confirm_password:
                 st.error("New passwords do not match.")
                 return
-
-            # Update the secrets.toml file
             try:
                 secrets_path = Path(".streamlit/secrets.toml")
                 if not secrets_path.exists():
                     st.error("secrets.toml file does not exist.")
-                    # Create empty file
                     with open(secrets_path, "w") as f:
                         f.write("")
-
-                # Load existing secrets
                 with open(secrets_path, "r") as f:
                     try:
                         secrets = toml.load(f)
                     except toml.TomlDecodeError:
                         st.error("secrets.toml is not a valid TOML file.")
                         return
-
-                # Update the password
                 secrets["password"] = new_password
-
-                # Write back to the file
                 with open(secrets_path, "w") as f:
                     toml.dump(secrets, f)
-
                 st.success("Password updated successfully. Please log in again.")
-
-                # Clear session state to force re-authentication
                 st.session_state.clear()
                 st.rerun()
-
             except Exception as e:
                 st.error(f"An error occurred while updating the password: {e}")
 
-            
 def do_init():
-    # Missing Password
     if "password_missing" in st.session_state:
         st.warning('You are using PBGUI without a password! Please set a password using "Change Password" below.', icon="⚠️")
     
-    # Load pb6 path from pbgui.ini
     if "input_pbdir" in st.session_state:
         if st.session_state.input_pbdir != st.session_state.pbdir:
             st.session_state.pbdir = st.session_state.input_pbdir
@@ -85,12 +64,8 @@ def do_init():
     if ".." in st.session_state.pbdir:
         st.session_state.pbdir = os.path.abspath(st.session_state.pbdir)
         save_ini("main", "pbdir", st.session_state.pbdir)
-    if Path(f"{st.session_state.pbdir}/passivbot.py").exists():
-        pbdir_ok = "✅"
-    else:
-        pbdir_ok = "❌"
+    pbdir_ok = "✅" if Path(f"{st.session_state.pbdir}/passivbot.py").exists() else "❌"
 
-    # Load pb6 venv from pbgui.ini
     if "input_pbvenv" in st.session_state:
         if st.session_state.input_pbvenv != st.session_state.pbvenv:
             st.session_state.pbvenv = st.session_state.input_pbvenv
@@ -99,12 +74,8 @@ def do_init():
     if ".." in st.session_state.pbvenv:
         st.session_state.pbvenv = os.path.abspath(st.session_state.pbvenv)
         save_ini("main", "pbvenv", st.session_state.pbvenv)
-    if Path(st.session_state.pbvenv).is_file() and PurePath(st.session_state.pbvenv).name.startswith("python"):
-        pbvenv_ok = "✅"
-    else:
-        pbvenv_ok = "❌"
+    pbvenv_ok = "✅" if Path(st.session_state.pbvenv).is_file() and PurePath(st.session_state.pbvenv).name.startswith("python") else "❌"
 
-    # Load pb7 path from pbgui.ini
     if "input_pb7dir" in st.session_state:
         if st.session_state.input_pb7dir != st.session_state.pb7dir:
             st.session_state.pb7dir = st.session_state.input_pb7dir
@@ -115,12 +86,8 @@ def do_init():
     if ".." in st.session_state.pb7dir:
         st.session_state.pb7dir = os.path.abspath(st.session_state.pb7dir)
         save_ini("main", "pb7dir", st.session_state.pb7dir)
-    if Path(f"{st.session_state.pb7dir}/src/passivbot.py").exists():
-        pb7dir_ok = "✅"
-    else:
-        pb7dir_ok = "❌"
+    pb7dir_ok = "✅" if Path(f"{st.session_state.pb7dir}/src/passivbot.py").exists() else "❌"
 
-    # Load pb7 venv from pbgui.ini
     if "input_pb7venv" in st.session_state:
         if st.session_state.input_pb7venv != st.session_state.pb7venv:
             st.session_state.pb7venv = st.session_state.input_pb7venv
@@ -129,18 +96,13 @@ def do_init():
     if ".." in st.session_state.pb7venv:
         st.session_state.pb7venv = os.path.abspath(st.session_state.pb7venv)
         save_ini("main", "pb7venv", st.session_state.pb7venv)
-    if Path(st.session_state.pb7venv).is_file() and PurePath(st.session_state.pb7venv).name.startswith("python"):
-        pb7venv_ok = "✅"
-    else:
-        pb7venv_ok = "❌"
+    pb7venv_ok = "✅" if Path(st.session_state.pb7venv).is_file() and PurePath(st.session_state.pb7venv).name.startswith("python") else "❌"
 
-    # Load pbname from pbgui.ini
     st.session_state.pbname = load_ini("main", "pbname")
     if not st.session_state.pbname:
         st.session_state.pbname = platform.node()
         save_ini("main", "pbname", st.session_state.pbname)
 
-    # Load role from pbgui.ini
     if "role" not in st.session_state:
         st.session_state.role = load_ini("main", "role")
         if st.session_state.role == "master":
@@ -148,6 +110,38 @@ def do_init():
         else:
             st.session_state.master = False
 
+    if not any([is_pb7_installed(), is_pb_installed()]):
+        st.warning('No Passivbot installed', icon="⚠️")
+        st.stop()
+    if is_pb_installed() and not st.session_state.pbvenv:
+        st.warning('Passivbot V6 venv is not configured', icon="⚠️")
+        st.stop()
+    if is_pb7_installed() and not st.session_state.pb7venv:
+        st.warning('Passivbot V7 venv is not configured', icon="⚠️")
+        st.stop()
+    if 'users' not in st.session_state:
+        with st.spinner('Initializing Users...'):
+            st.session_state.users = Users()
+    if 'pbgui_instances' not in st.session_state:
+        with st.spinner('Initializing Instances...'):
+            st.session_state.pbgui_instances = Instances()
+    if 'multi_instances' not in st.session_state:
+        with st.spinner('Initializing Multi Instances...'):
+            st.session_state.multi_instances = MultiInstances()
+    if 'v7_instances' not in st.session_state:
+        with st.spinner('Initializing v7 Instances...'):
+            st.session_state.v7_instances = V7Instances()
+    if 'services' not in st.session_state:
+        with st.spinner('Initializing Services...'):
+            st.session_state.services = Services()
+    if not st.session_state.users.list():
+        st.warning('No users configured / Go to Setup API-Keys and configure your first user', icon="⚠️")
+    if not st.session_state.pbcoindata.fetch_api_status():
+        st.warning('Coin Data API is not configured / Go to Coin Data and configure your API-Key', icon="⚠️")
+
+    return pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok
+
+def render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok):
     col1, col2 = st.columns([5,1], vertical_alignment="bottom")
     with col1:
         st.text_input("Passivbot V6 path " + pbdir_ok, value=st.session_state.pbdir, key='input_pbdir')
@@ -178,10 +172,6 @@ def do_init():
 
     col1, col2 = st.columns([5,1], vertical_alignment="bottom")
     with col1:
-        if "input_pb7venv" in st.session_state:
-            if st.session_state.input_pb7venv != st.session_state.pb7venv:
-                st.session_state.pb7venv = st.session_state.input_pb7venv
-                save_ini("main", "pb7venv", st.session_state.pb7venv)
         st.text_input("Passivbot V7 python interpreter (venv/bin/python) " + pb7venv_ok, value=st.session_state.pb7venv, key='input_pb7venv')
     with col2:
         if st.button("Browse", key='button_change_pb7venv'):
@@ -207,58 +197,33 @@ def do_init():
                     st.session_state.role = "slave"
         st.checkbox("Master", value=st.session_state.master, key="input_master", help=pbgui_help.role)
 
-    # Check if any passivbot is installed
-    if not any([is_pb7_installed(), is_pb_installed()]):
-        st.warning('No Passivbot installed', icon="⚠️")
-        st.stop()
-    # Check if any pb6 venv is configured
-    if is_pb_installed() and not st.session_state.pbvenv:
-        st.warning('Passivbot V6 venv is not configured', icon="⚠️")
-        st.stop()
-    # Check if any pb7 venv is configured
-    if is_pb7_installed() and not st.session_state.pb7venv:
-        st.warning('Passivbot V7 venv is not configured', icon="⚠️")
-        st.stop()
-    # Init Users
-    if 'users' not in st.session_state:
-        with st.spinner('Initializing Users...'):
-            st.session_state.users = Users()
-    # Init Instances
-    if 'pbgui_instances' not in st.session_state:
-        with st.spinner('Initializing Instances...'):
-            st.session_state.pbgui_instances = Instances()
-    # Init Multi Instances
-    if 'multi_instances' not in st.session_state:
-        with st.spinner('Initializing Multi Instances...'):
-            st.session_state.multi_instances = MultiInstances()
-    # Init V7 Instances
-    if 'v7_instances' not in st.session_state:
-        with st.spinner('Initializing v7 Instances...'):
-            st.session_state.v7_instances = V7Instances()
-    # Init Services
-    if 'services' not in st.session_state:
-        with st.spinner('Initializing Services...'):
-            st.session_state.services = Services()
-    # Check if any users are configured
-    if not st.session_state.users.list():
-        st.warning('No users configured / Go to Setup API-Keys and configure your first user', icon="⚠️")
-    # Check if CoinData configured
-    if not st.session_state.pbcoindata.fetch_api_status():
-        st.warning('Coin Data API is not configured / Go to Coin Data and configure your API-Key', icon="⚠️")
-    
-    # Add a horizontal divider
     st.markdown("---")
-    
-    # Add the Change Password section
     change_password()
 
 # Page Setup
 set_page_config("Welcome")
 st.header("Welcome to Passivbot GUI", divider="red")
-    
+
 # Show Login-Dialog on demand
 check_password()
 
 # Once we're logged in, we can initialize the session and do checks
 if is_authenticted():
-    do_init()
+    # Check if just logged in
+    if "just_logged_in" not in st.session_state:
+        st.session_state.just_logged_in = True
+        pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok = do_init()
+        # Redirect to Dashboards page
+        try:
+            st.switch_page("navi/info_dashboards.py")
+        except Exception as e:
+            st.error(f"Cannot redirect to Dashboards: {e}. Please navigate to Dashboards manually.")
+            render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok)
+    else:
+        # Already logged in, show Welcome page
+        pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok = do_init()
+        render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok)
+else:
+    # Reset just_logged_in when not authenticated
+    if "just_logged_in" in st.session_state:
+        del st.session_state.just_logged_in
