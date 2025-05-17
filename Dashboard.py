@@ -836,7 +836,7 @@ class Dashboard():
         return f"background-color: {bgcolor};"
 
     @st.fragment
-    def view_positions(self, position : str, user : str = None):
+    def view_positions(self, position: str, user: str = None):
         users = st.session_state.users
         if f"dashboard_positions_users_{position}" not in st.session_state:
             if user:
@@ -874,29 +874,40 @@ class Dashboard():
                 for pos in positions:
                     symbol = pos[1]
                     user = pos[6]
+                    side = pos[7].lower()  # 'long' or 'short'
                     orders = self.db.fetch_orders_by_symbol(user, symbol)
                     dca = 0
                     next_tp = 0
                     next_dca = 0
                     for order in orders:
-                        # print(order)
-                        if order[5] == "buy":
-                            dca += 1
-                            if next_dca < order[4]:
-                                next_dca = order[4]
-                        elif order[5] == "sell":
-                            if next_tp == 0 or next_tp > order[4]:
-                                next_tp = order[4]
+                        order_side = order[5]  # 'buy' or 'sell'
+                        order_price = order[4]
+                        if side == 'long':
+                            if order_side == "buy":
+                                dca += 1
+                                if next_dca < order_price:
+                                    next_dca = order_price
+                            elif order_side == "sell":
+                                if next_tp == 0 or next_tp > order_price:
+                                    next_tp = order_price
+                        elif side == 'short':
+                            if order_side == "sell":
+                                dca += 1
+                                if next_dca == 0 or next_dca > order_price:
+                                    next_dca = order_price
+                            elif order_side == "buy":
+                                if next_tp == 0 or next_tp < order_price:
+                                    next_tp = order_price
                     # Find price from prices
                     price = 0
                     for p in prices:
                         if p[1] == symbol:
                             price = p[3]
-                    # cals pos value
+                    # Calculate pos value
                     pos_value = pos[3] * price
                     all_positions.append(tuple(pos) + (price,) + (dca,) + (next_dca,) + (next_tp, pos_value))
-            df = pd.DataFrame(all_positions, columns =['Id', 'Symbol', 'PosId', 'Size', 'uPnl', 'Entry', 'User', 'Side', 'Price', 'DCA', 'Next DCA', 'Next TP', 'Pos Value'])
-            # sorty df by User, Symbol
+            df = pd.DataFrame(all_positions, columns=['Id', 'Symbol', 'PosId', 'Size', 'uPnl', 'Entry', 'User', 'Side', 'Price', 'DCA', 'Next DCA', 'Next TP', 'Pos Value'])
+            # Sort by User, Symbol
             df = df.sort_values(by=['User', 'Symbol'])
             # Move User to second column
             df = df[['Id', 'User', 'Symbol', 'Side', 'PosId', 'Size', 'uPnl', 'Entry', 'Price', 'DCA', 'Next DCA', 'Next TP', 'Pos Value']]
@@ -907,7 +918,7 @@ class Dashboard():
                 "PosId": None
             }
             st.dataframe(sdf, height=36+(len(df))*35, use_container_width=True, key=f"dashboard_positions_{position}", on_select="rerun", selection_mode='single-row', hide_index=None, column_order=None, column_config=column_config)
-
+        
     @st.fragment
     def view_orders(self, pos : str, orders : str = None, tf : str = "4h", edit : bool = False):
         position = None
