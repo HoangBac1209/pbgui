@@ -946,7 +946,7 @@ class Dashboard():
         user = users.find_user(position["User"])
         exchange = Exchange(user.exchange, user)
         market_type = "futures"
-        col1, col2, col3 = st.columns([1,1,8], vertical_alignment="bottom")
+        col1, col2, col3 = st.columns([1, 1, 8], vertical_alignment="bottom")
         with col1:
             st.selectbox('Timeframe', exchange.tf, index=exchange.tf.index(tf), key=f"dashboard_orders_tf_{pos}")
         with col2:
