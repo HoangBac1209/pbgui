@@ -973,7 +973,7 @@ class Dashboard():
         st.session_state[f'dashboard_orders_range_{pos}'] = int(ohlcv_df.iloc[-1]["timestamp"] - ohlcv_df.iloc[0]["timestamp"])
         ohlcv_df["color"] = np.where(ohlcv_df["close"] > ohlcv_df["open"], "green", "red")
         time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 0.2])
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 0.2, 0.2])
         with col1:
             st.markdown(f"#### :blue[User:] :green[{user.name}]")
         with col2:
@@ -983,6 +983,12 @@ class Dashboard():
         with col4:
             if st.button(":material/refresh:", key=f"dashboard_orders_rerun_{pos}"):
                 st.rerun(scope="fragment")
+        with col5:
+            if st.button(":material/clear:", key=f"dashboard_orders_clear_{pos}"):
+                for key in list(st.session_state.keys()):
+                    if key.startswith(f"dashboard_orders_{pos}") or key.startswith(f"view_orders_{pos}"):
+                        del st.session_state[key]
+                st.rerun()
         fig = go.Figure(data=[go.Candlestick(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
                 open=ohlcv_df["open"], high=ohlcv_df["high"],
                 low=ohlcv_df["low"], close=ohlcv_df["close"],
@@ -1009,8 +1015,7 @@ class Dashboard():
         price = 4
         side = 5
         orders = sorted(orders, key=lambda x: x[price], reverse=True)
-        position_side = position["Side"].lower()  # 'long' or 'short'
-        # Debug: Show position side and orders
+        position_side = position.get("Side", "").lower()  # Handle missing Side
         st.write(f"Debug: Position Side = {position_side}")
         for order in orders:
             order_side = order[side]  # 'buy' or 'sell'
@@ -1019,14 +1024,15 @@ class Dashboard():
             st.write(f"Debug: Order Side = {order_side}, Price = {order_price}, Amount = {order_amount}")
             if position_side == 'long':
                 color = "red" if order_side == "sell" else "green"
-                legend = f'TP: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'DCA: {str(order_price)} amount: {str(order_amount)}'
+                legend = f'close: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'open: {str(order_price)} amount: {str(order_amount)}'
             elif position_side == 'short':
                 color = "red" if order_side == "sell" else "green"
-                legend = f'DCA: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'TP: {str(order_price)} amount: {str(order_amount)}'
+                legend = f'open: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'close: {str(order_price)} amount: {str(order_amount)}'
             else:
                 st.error(f"Invalid position side: {position_side}")
-                legend = f'Unknown: {str(order_price)} amount: {str(order_amount)}'
+                legend = f'unknown: {str(order_price)} amount: {str(order_amount)}'
                 color = "gray"
+            st.write(f"Debug: Legend = {legend}, Color = {color}")
             fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
                                     y=[order_price] * len(ohlcv_df),
                                     mode='lines',
