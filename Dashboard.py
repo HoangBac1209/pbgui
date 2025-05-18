@@ -1010,16 +1010,23 @@ class Dashboard():
         side = 5
         orders = sorted(orders, key=lambda x: x[price], reverse=True)
         position_side = position["Side"].lower()  # 'long' or 'short'
+        # Debug: Show position side and orders
+        st.write(f"Debug: Position Side = {position_side}")
         for order in orders:
             order_side = order[side]  # 'buy' or 'sell'
             order_price = order[price]
             order_amount = order[amount]
+            st.write(f"Debug: Order Side = {order_side}, Price = {order_price}, Amount = {order_amount}")
             if position_side == 'long':
                 color = "red" if order_side == "sell" else "green"
-                legend = f'close: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'open: {str(order_price)} amount: {str(order_amount)}'
-            else:  # position_side == 'short'
+                legend = f'TP: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'DCA: {str(order_price)} amount: {str(order_amount)}'
+            elif position_side == 'short':
                 color = "red" if order_side == "sell" else "green"
-                legend = f'open: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'close: {str(order_price)} amount: {str(order_amount)}'
+                legend = f'DCA: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'TP: {str(order_price)} amount: {str(order_amount)}'
+            else:
+                st.error(f"Invalid position side: {position_side}")
+                legend = f'Unknown: {str(order_price)} amount: {str(order_amount)}'
+                color = "gray"
             fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
                                     y=[order_price] * len(ohlcv_df),
                                     mode='lines',
