@@ -920,7 +920,7 @@ class Dashboard():
             st.dataframe(sdf, height=36+(len(df))*35, use_container_width=True, key=f"dashboard_positions_{position}", on_select="rerun", selection_mode='single-row', hide_index=None, column_order=None, column_config=column_config)
         
     @st.fragment
-    def view_orders(self, pos : str, orders : str = None, tf : str = "4h", edit : bool = False):
+    def view_orders(self, pos: str, orders: str = None, tf: str = "4h", edit: bool = False):
         position = None
         view_orders = {key: val for key, val in st.session_state.items()
             if key.startswith("view_orders_")}
@@ -948,7 +948,7 @@ class Dashboard():
         market_type = "futures"
         col1, col2, col3 = st.columns([1,1,8], vertical_alignment="bottom")
         with col1:
-            st.selectbox('Timeframe',exchange.tf,index=exchange.tf.index(tf), key=f"dashboard_orders_tf_{pos}")
+            st.selectbox('Timeframe', exchange.tf, index=exchange.tf.index(tf), key=f"dashboard_orders_tf_{pos}")
         with col2:
             since = None
             if f'dashboard_orders_leftclick_{pos}' not in st.session_state:
@@ -968,11 +968,10 @@ class Dashboard():
         elif symbol[-4:] == "USDC":
             symbol_ccxt = f'{symbol[0:-4]}/USDC:USDC'
         ohlcv = exchange.fetch_ohlcv(symbol_ccxt, market_type, timeframe=st.session_state[f'dashboard_orders_tf_{pos}'], limit=100, since=since)
-        ohlcv_df = pd.DataFrame(ohlcv, columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        ohlcv_df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         st.session_state[f'dashboard_orders_since_{pos}'] = int(ohlcv_df.iloc[0]["timestamp"])
         st.session_state[f'dashboard_orders_range_{pos}'] = int(ohlcv_df.iloc[-1]["timestamp"] - ohlcv_df.iloc[0]["timestamp"])
         ohlcv_df["color"] = np.where(ohlcv_df["close"] > ohlcv_df["open"], "green", "red")
-        # w = (ohlcv_df["timestamp"][1] - ohlcv_df["timestamp"][0]) * 0.8
         time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         col1, col2, col3, col4 = st.columns([1, 1, 1, 0.2])
         with col1:
@@ -984,18 +983,14 @@ class Dashboard():
         with col4:
             if st.button(":material/refresh:", key=f"dashboard_orders_rerun_{pos}"):
                 st.rerun(scope="fragment")
-        # layout = go.Layout(title=f'{symbol} | {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")} UTC', title_font=dict(size=36), showlegend=True)
         fig = go.Figure(data=[go.Candlestick(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
-               open=ohlcv_df["open"], high=ohlcv_df["high"],
-               low=ohlcv_df["low"], close=ohlcv_df["close"],
-               increasing_line_color='green', decreasing_line_color='red')])
-        # remove legend from trace 0
+                open=ohlcv_df["open"], high=ohlcv_df["high"],
+                low=ohlcv_df["low"], close=ohlcv_df["close"],
+                increasing_line_color='green', decreasing_line_color='red')])
         fig.data[0].showlegend = False
         fig.update_layout(yaxis=dict(title='USDT', title_font=dict(size=24)), xaxis_rangeslider_visible=False, height=800, xaxis_type='category')
         fig.update_layout(xaxis_rangeslider_visible=False, xaxis_tickformat='%H:%M')
         fig.update_xaxes(tickangle=-90, tickfont=dict(size=14), dtick='8')
-        # fig.update_layout(xaxis_rangeslider_visible=False, width=1280, height=1024)
-        # balance = exchange.fetch_balance(market_type)
         prices = self.db.fetch_prices(user)
         price = 0
         for p in prices:
@@ -1003,27 +998,33 @@ class Dashboard():
                 price = p[3]
         orders = self.db.fetch_orders_by_symbol(user.name, symbol)
         color = "red" if price < ohlcv_df["open"].iloc[-1] else "green"
-        # add price line to candlestick
         fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'), y=[price] * len(ohlcv_df), mode='lines', line=dict(color=color, width=1), name=f'price: {str(round(price,5))}'))
-        # position
         color = "red" if price < position["Entry"] else "green"
         size = position["Size"]
         fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
                                 y=[position["Entry"]] * len(ohlcv_df), mode='lines',
-                                line=dict(color=color, width=1, dash = 'dash'),
+                                line=dict(color=color, width=1, dash='dash'),
                                 name=f'position: {str(round(position["Entry"],5))} size: {str(size)}<br>Pnl: {str(round(position["uPnl"],5))}'))
         amount = 3
         price = 4
         side = 5
         orders = sorted(orders, key=lambda x: x[price], reverse=True)
+        position_side = position["Side"].lower()  # 'long' or 'short'
         for order in orders:
-            color = "red" if order[side] == "sell" else "green"
-            legend = f'close: {str(order[price])} amount: {str(order[amount])}' if order[side] == "sell" else f'open: {str(order[price])} amount: {str(order[amount])}'
+            order_side = order[side]  # 'buy' or 'sell'
+            order_price = order[price]
+            order_amount = order[amount]
+            if position_side == 'long':
+                color = "red" if order_side == "sell" else "green"
+                legend = f'close: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'open: {str(order_price)} amount: {str(order_amount)}'
+            else:  # position_side == 'short'
+                color = "red" if order_side == "sell" else "green"
+                legend = f'open: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'close: {str(order_price)} amount: {str(order_amount)}'
             fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
-                                    y=[order[price]] * len(ohlcv_df),
+                                    y=[order_price] * len(ohlcv_df),
                                     mode='lines',
-                                    line=dict(color=color, width=2, dash = 'dot'), name=legend))
-        fig.update_layout(legend = dict(font = dict(size = 14)))
+                                    line=dict(color=color, width=2, dash='dot'), name=legend))
+        fig.update_layout(legend=dict(font=dict(size=14)))
         st.plotly_chart(fig, key=f"dashboard_orders_plot_{pos}")
 
 
