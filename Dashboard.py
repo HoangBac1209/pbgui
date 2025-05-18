@@ -1004,16 +1004,26 @@ class Dashboard():
             if p[1] == symbol:
                 price = p[3]
         orders = self.db.fetch_orders_by_symbol(user.name, symbol)
-        # Filter orders by Side
+        # Debug: Show all orders before filtering
+        st.write(f"Debug: All Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in orders]}")
+        # Filter orders by Side and price relative to position["Entry"]
         filtered_orders = []
+        entry_price = position.get("Entry", 0)
         for order in orders:
             order_side = order[5]  # 'buy' or 'sell'
+            order_price = order[4]
             if position_side == 'long':
-                if order_side in ['buy', 'sell']:  # DCA (buy) or TP (sell) for long
+                if order_side == 'buy' and order_price <= entry_price:  # DCA: buy below entry
+                    filtered_orders.append(order)
+                elif order_side == 'sell' and order_price >= entry_price:  # TP: sell above entry
                     filtered_orders.append(order)
             elif position_side == 'short':
-                if order_side in ['sell', 'buy']:  # DCA (sell) or TP (buy) for short
+                if order_side == 'sell' and order_price >= entry_price:  # DCA: sell above entry
                     filtered_orders.append(order)
+                elif order_side == 'buy' and order_price <= entry_price:  # TP: buy below entry
+                    filtered_orders.append(order)
+        # Debug: Show filtered orders
+        st.write(f"Debug: Filtered Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in filtered_orders]}")
         color = "red" if price < ohlcv_df["open"].iloc[-1] else "green"
         fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'), y=[price] * len(ohlcv_df), mode='lines', line=dict(color=color, width=1), name=f'price: {str(round(price,5))}'))
         color = "red" if price < position["Entry"] else "green"
@@ -1046,7 +1056,6 @@ class Dashboard():
                                     line=dict(color=color, width=2, dash='dot'), name=legend))
         fig.update_layout(legend=dict(font=dict(size=14)))
         st.plotly_chart(fig, key=f"dashboard_orders_plot_{pos}")
-
 
 def main():
     print("Don't Run this Class from CLI")
