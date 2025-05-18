@@ -962,6 +962,7 @@ class Dashboard():
                     since = st.session_state[f'dashboard_orders_since_{pos}'] + st.session_state[f'dashboard_orders_range_{pos}']
                     st.session_state[f'dashboard_orders_leftclick_{pos}'] -= 1
         symbol = position["Symbol"]
+        position_side = position.get("Side", "").lower()
         # symbol to ccxt_symbol
         if symbol[-4:] == "USDT":
             symbol_ccxt = f'{symbol[0:-4]}/USDT:USDT'
@@ -977,7 +978,7 @@ class Dashboard():
         with col1:
             st.markdown(f"#### :blue[User:] :green[{user.name}]")
         with col2:
-            st.markdown(f"#### :blue[Symbol:] :green[{symbol}]")
+            st.markdown(f"#### :blue[Symbol:] :green[{symbol} ({position_side.capitalize()})]")
         with col3:
             st.markdown(f"#### :blue[Time:] :green[{time}]")
         with col4:
@@ -1003,6 +1004,16 @@ class Dashboard():
             if p[1] == symbol:
                 price = p[3]
         orders = self.db.fetch_orders_by_symbol(user.name, symbol)
+        # Filter orders by Side
+        filtered_orders = []
+        for order in orders:
+            order_side = order[5]  # 'buy' or 'sell'
+            if position_side == 'long':
+                if order_side in ['buy', 'sell']:  # DCA (buy) or TP (sell) for long
+                    filtered_orders.append(order)
+            elif position_side == 'short':
+                if order_side in ['sell', 'buy']:  # DCA (sell) or TP (buy) for short
+                    filtered_orders.append(order)
         color = "red" if price < ohlcv_df["open"].iloc[-1] else "green"
         fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'), y=[price] * len(ohlcv_df), mode='lines', line=dict(color=color, width=1), name=f'price: {str(round(price,5))}'))
         color = "red" if price < position["Entry"] else "green"
@@ -1014,9 +1025,8 @@ class Dashboard():
         amount = 3
         price = 4
         side = 5
-        orders = sorted(orders, key=lambda x: x[price], reverse=True)
-        position_side = position.get("Side", "").lower()
-        for order in orders:
+        filtered_orders = sorted(filtered_orders, key=lambda x: x[price], reverse=True)
+        for order in filtered_orders:
             order_side = order[side]
             order_price = order[price]
             order_amount = order[amount]
