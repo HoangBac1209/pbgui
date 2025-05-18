@@ -852,7 +852,7 @@ class Dashboard():
                 if not "edit_dashboard" in st.session_state:
                     st.rerun()
         st.markdown("#### :blue[Positions]")
-        col1, col2 = st.columns([5,0.2], vertical_alignment="bottom")
+        col1, col2 = st.columns([5, 0.2], vertical_alignment="bottom")
         with col1:
             st.multiselect('Users', ['ALL'] + users.list(), key=f"dashboard_positions_users_{position}")
         with col2:
@@ -875,27 +875,55 @@ class Dashboard():
                     symbol = pos[1]
                     user = pos[6]
                     side = pos[7].lower()  # 'long' or 'short'
+                    entry_price = pos[5]  # Entry price
                     orders = self.db.fetch_orders_by_symbol(user, symbol)
-                    dca = 0
-                    next_tp = 0
-                    next_dca = 0
+                    # Debug: Show all orders and position details
+                    st.write(f"Debug: Position Side: {side}, Entry Price: {entry_price}")
+                    st.write(f"Debug: All Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in orders]}")
+                    # Filter orders by Side and price relative to entry_price
+                    filtered_orders = []
                     for order in orders:
-                        order_side = order[5]  # 'buy' or 'sell'
+                        order_side = order[5]
                         order_price = order[4]
                         if side == 'long':
-                            if order_side == "buy":
+                            if order_side == 'buy' and order_price <= entry_price:  # DCA: buy below or at entry
+                                filtered_orders.append(order)
+                                st.write(f"Debug: Included buy (DCA) - price={order_price} <= entry={entry_price}")
+                            elif order_side == 'sell' and order_price > entry_price:  # TP: sell strictly above entry
+                                filtered_orders.append(order)
+                                st.write(f"Debug: Included sell (TP) - price={order_price} > entry={entry_price}")
+                        elif side == 'short':
+                            if order_side == 'sell' and order_price >= entry_price:  # DCA: sell at or above entry
+                                filtered_orders.append(order)
+                                st.write(f"Debug: Included sell (DCA) - price={order_price} >= entry={entry_price}")
+                            elif order_side == 'buy' and order_price < entry_price:  # TP: buy strictly below entry
+                                filtered_orders.append(order)
+                                st.write(f"Debug: Included buy (TP) - price={order_price} < entry={entry_price}")
+                    # Debug: Show filtered orders
+                    st.write(f"Debug: Filtered Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in filtered_orders]}")
+                    if side == 'long' and not any(order[5] == 'buy' for order in filtered_orders):
+                        st.warning(f"No buy orders (DCA) found for long position (User: {user}, Symbol: {symbol}). Check database.")
+                    # Calculate DCA, Next DCA, Next TP
+                    dca = 0
+                    next_dca = 0
+                    next_tp = 0
+                    for order in filtered_orders:
+                        order_side = order[5]
+                        order_price = order[4]
+                        if side == 'long':
+                            if order_side == 'buy':
                                 dca += 1
                                 if next_dca < order_price:
                                     next_dca = order_price
-                            elif order_side == "sell":
+                            elif order_side == 'sell':
                                 if next_tp == 0 or next_tp > order_price:
                                     next_tp = order_price
                         elif side == 'short':
-                            if order_side == "sell":
+                            if order_side == 'sell':
                                 dca += 1
                                 if next_dca == 0 or next_dca > order_price:
                                     next_dca = order_price
-                            elif order_side == "buy":
+                            elif order_side == 'buy':
                                 if next_tp == 0 or next_tp < order_price:
                                     next_tp = order_price
                     # Find price from prices
@@ -1004,7 +1032,8 @@ class Dashboard():
             if p[1] == symbol:
                 price = p[3]
         orders = self.db.fetch_orders_by_symbol(user.name, symbol)
-        # Debug: Show all orders before filtering
+        # Debug: Show all orders and position details
+        st.write(f"Debug: Position Side: {position_side}, Entry Price: {position.get('Entry', 0)}")
         st.write(f"Debug: All Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in orders]}")
         # Filter orders by Side and price relative to position["Entry"]
         filtered_orders = []
@@ -1013,17 +1042,23 @@ class Dashboard():
             order_side = order[5]  # 'buy' or 'sell'
             order_price = order[4]
             if position_side == 'long':
-                if order_side == 'buy' and order_price <= entry_price:  # DCA: buy below entry
+                if order_side == 'buy' and order_price <= entry_price:  # DCA: buy below or at entry
                     filtered_orders.append(order)
-                elif order_side == 'sell' and order_price >= entry_price:  # TP: sell above entry
+                    st.write(f"Debug: Included buy (DCA) - price={order_price} <= entry={entry_price}")
+                elif order_side == 'sell' and order_price > entry_price:  # TP: sell strictly above entry
                     filtered_orders.append(order)
+                    st.write(f"Debug: Included sell (TP) - price={order_price} > entry={entry_price}")
             elif position_side == 'short':
-                if order_side == 'sell' and order_price >= entry_price:  # DCA: sell above entry
+                if order_side == 'sell' and order_price >= entry_price:  # DCA: sell at or above entry
                     filtered_orders.append(order)
-                elif order_side == 'buy' and order_price <= entry_price:  # TP: buy below entry
+                    st.write(f"Debug: Included sell (DCA) - price={order_price} >= entry={entry_price}")
+                elif order_side == 'buy' and order_price < entry_price:  # TP: buy strictly below entry
                     filtered_orders.append(order)
+                    st.write(f"Debug: Included buy (TP) - price={order_price} < entry={entry_price}")
         # Debug: Show filtered orders
         st.write(f"Debug: Filtered Orders: {[f'side={order[5]}, price={order[4]}, amount={order[3]}' for order in filtered_orders]}")
+        if position_side == 'long' and not any(order[5] == 'buy' for order in filtered_orders):
+            st.warning("No buy orders (DCA) found for long position. Check database.")
         color = "red" if price < ohlcv_df["open"].iloc[-1] else "green"
         fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'), y=[price] * len(ohlcv_df), mode='lines', line=dict(color=color, width=1), name=f'price: {str(round(price,5))}'))
         color = "red" if price < position["Entry"] else "green"
