@@ -1015,13 +1015,11 @@ class Dashboard():
         price = 4
         side = 5
         orders = sorted(orders, key=lambda x: x[price], reverse=True)
-        position_side = position.get("Side", "").lower()  # Handle missing Side
-        st.write(f"Debug: Position Side = {position_side}")
+        position_side = position.get("Side", "").lower()
         for order in orders:
-            order_side = order[side]  # 'buy' or 'sell'
+            order_side = order[side]
             order_price = order[price]
             order_amount = order[amount]
-            st.write(f"Debug: Order Side = {order_side}, Price = {order_price}, Amount = {order_amount}")
             if position_side == 'long':
                 color = "red" if order_side == "sell" else "green"
                 legend = f'close: {str(order_price)} amount: {str(order_amount)}' if order_side == "sell" else f'open: {str(order_price)} amount: {str(order_amount)}'
@@ -1032,7 +1030,6 @@ class Dashboard():
                 st.error(f"Invalid position side: {position_side}")
                 legend = f'unknown: {str(order_price)} amount: {str(order_amount)}'
                 color = "gray"
-            st.write(f"Debug: Legend = {legend}, Color = {color}")
             fig.add_trace(go.Scatter(x=pd.to_datetime(ohlcv_df["timestamp"], unit='ms'),
                                     y=[order_price] * len(ohlcv_df),
                                     mode='lines',
