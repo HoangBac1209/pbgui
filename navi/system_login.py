@@ -50,6 +50,96 @@ def change_password():
             except Exception as e:
                 st.error(f"An error occurred while updating the password: {e}")
 
+def is_configured():
+    """Check if all required configurations are valid, including both Passivbot V6 and V7 if installed."""
+    pbdir = load_ini("main", "pbdir")
+    pbvenv = load_ini("main", "pbvenv")
+    pb7dir = load_ini("main", "pb7dir")
+    pb7venv = load_ini("main", "pb7venv")
+    pbname = load_ini("main", "pbname")
+    role = load_ini("main", "role")
+
+    # Initialize Users and CoinData for validation
+    users = Users()
+    coin_data = CoinData()
+
+    # Check Passivbot V6 configuration
+    if pbdir and pbdir.strip() != "":
+        # Check if path exists
+        if not Path(pbdir).exists():
+            st.session_state.config_error = f"Passivbot V6 path '{pbdir}' does not exist."
+            return False
+        # Check if passivbot.py exists
+        if not Path(f"{pbdir}/passivbot.py").exists():
+            st.session_state.config_error = f"Passivbot V6 path '{pbdir}' is missing passivbot.py."
+            return False
+        # Check if venv is configured
+        if not pbvenv or pbvenv.strip() == "":
+            st.session_state.config_error = "Passivbot V6 venv is not configured."
+            return False
+        # Check if venv is a valid file
+        if not Path(pbvenv).is_file():
+            st.session_state.config_error = f"Passivbot V6 venv '{pbvenv}' is not a valid file."
+            return False
+        # Check if venv is a valid Python interpreter
+        if not PurePath(pbvenv).name.startswith("python"):
+            st.session_state.config_error = f"Passivbot V6 venv '{pbvenv}' is not a valid Python interpreter."
+            return False
+    else:
+        st.session_state.config_error = "Passivbot V6 path is not configured."
+        return False
+
+    # Check Passivbot V7 configuration
+    if pb7dir and pb7dir.strip() != "":
+        # Check if path exists
+        if not Path(pb7dir).exists():
+            st.session_state.config_error = f"Passivbot V7 path '{pb7dir}' does not exist."
+            return False
+        # Check if src/passivbot.py exists
+        if not Path(f"{pb7dir}/src/passivbot.py").exists():
+            st.session_state.config_error = f"Passivbot V7 path '{pb7dir}' is missing src/passivbot.py."
+            return False
+        # Check if venv is configured
+        if not pb7venv or pb7venv.strip() == "":
+            st.session_state.config_error = "Passivbot V7 venv is not configured."
+            return False
+        # Check if venv is a valid file
+        if not Path(pb7venv).is_file():
+            st.session_state.config_error = f"Passivbot V7 venv '{pb7venv}' is not a valid file."
+            return False
+        # Check if venv is a valid Python interpreter
+        if not PurePath(pb7venv).name.startswith("python"):
+            st.session_state.config_error = f"Passivbot V7 venv '{pb7venv}' is not a valid Python interpreter."
+            return False
+    else:
+        st.session_state.config_error = "Passivbot V7 path is not configured."
+        return False
+
+    # Check bot name
+    if not pbname or pbname.strip() == "":
+        st.session_state.config_error = "Bot name is not configured or empty."
+        return False
+
+    # Check role
+    if not role or role not in ["master", "slave"]:
+        st.session_state.config_error = "Role (master/slave) is not configured or invalid."
+        return False
+
+    # Check users
+    if not users.list():
+        st.session_state.config_error = "No users are configured. Please configure at least one user in Setup API-Keys."
+        return False
+
+    # Check Coin Data API
+    if not coin_data.fetch_api_status():
+        st.session_state.config_error = "Coin Data API is not configured. Please configure it in Coin Data."
+        return False
+
+    # Clear config error if all checks pass
+    if "config_error" in st.session_state:
+        del st.session_state.config_error
+    return True
+
 def do_init():
     if "password_missing" in st.session_state:
         st.warning('You are using PBGUI without a password! Please set a password using "Change Password" below.', icon="⚠️")
@@ -64,7 +154,7 @@ def do_init():
     if ".." in st.session_state.pbdir:
         st.session_state.pbdir = os.path.abspath(st.session_state.pbdir)
         save_ini("main", "pbdir", st.session_state.pbdir)
-    pbdir_ok = "✅" if Path(f"{st.session_state.pbdir}/passivbot.py").exists() else "❌"
+    pbdir_ok = "✅" if st.session_state.pbdir and Path(f"{st.session_state.pbdir}/passivbot.py").exists() else "❌"
 
     if "input_pbvenv" in st.session_state:
         if st.session_state.input_pbvenv != st.session_state.pbvenv:
@@ -74,7 +164,7 @@ def do_init():
     if ".." in st.session_state.pbvenv:
         st.session_state.pbvenv = os.path.abspath(st.session_state.pbvenv)
         save_ini("main", "pbvenv", st.session_state.pbvenv)
-    pbvenv_ok = "✅" if Path(st.session_state.pbvenv).is_file() and PurePath(st.session_state.pbvenv).name.startswith("python") else "❌"
+    pbvenv_ok = "✅" if st.session_state.pbvenv and Path(st.session_state.pbvenv).is_file() and PurePath(st.session_state.pbvenv).name.startswith("python") else "❌"
 
     if "input_pb7dir" in st.session_state:
         if st.session_state.input_pb7dir != st.session_state.pb7dir:
@@ -86,7 +176,7 @@ def do_init():
     if ".." in st.session_state.pb7dir:
         st.session_state.pb7dir = os.path.abspath(st.session_state.pb7dir)
         save_ini("main", "pb7dir", st.session_state.pb7dir)
-    pb7dir_ok = "✅" if Path(f"{st.session_state.pb7dir}/src/passivbot.py").exists() else "❌"
+    pb7dir_ok = "✅" if st.session_state.pb7dir and Path(f"{st.session_state.pb7dir}/src/passivbot.py").exists() else "❌"
 
     if "input_pb7venv" in st.session_state:
         if st.session_state.input_pb7venv != st.session_state.pb7venv:
@@ -96,7 +186,7 @@ def do_init():
     if ".." in st.session_state.pb7venv:
         st.session_state.pb7venv = os.path.abspath(st.session_state.pb7venv)
         save_ini("main", "pb7venv", st.session_state.pb7venv)
-    pb7venv_ok = "✅" if Path(st.session_state.pb7venv).is_file() and PurePath(st.session_state.pb7venv).name.startswith("python") else "❌"
+    pb7venv_ok = "✅" if st.session_state.pb7venv and Path(st.session_state.pb7venv).is_file() and PurePath(st.session_state.pb7venv).name.startswith("python") else "❌"
 
     st.session_state.pbname = load_ini("main", "pbname")
     if not st.session_state.pbname:
@@ -110,15 +200,7 @@ def do_init():
         else:
             st.session_state.master = False
 
-    if not any([is_pb7_installed(), is_pb_installed()]):
-        st.warning('No Passivbot installed', icon="⚠️")
-        st.stop()
-    if is_pb_installed() and not st.session_state.pbvenv:
-        st.warning('Passivbot V6 venv is not configured', icon="⚠️")
-        st.stop()
-    if is_pb7_installed() and not st.session_state.pb7venv:
-        st.warning('Passivbot V7 venv is not configured', icon="⚠️")
-        st.stop()
+    # Always initialize session state objects to allow navigation
     if 'users' not in st.session_state:
         with st.spinner('Initializing Users...'):
             st.session_state.users = Users()
@@ -134,14 +216,13 @@ def do_init():
     if 'services' not in st.session_state:
         with st.spinner('Initializing Services...'):
             st.session_state.services = Services()
-    if not st.session_state.users.list():
-        st.warning('No users configured / Go to Setup API-Keys and configure your first user', icon="⚠️")
-    if not st.session_state.pbcoindata.fetch_api_status():
-        st.warning('Coin Data API is not configured / Go to Coin Data and configure your API-Key', icon="⚠️")
 
     return pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok
 
 def render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok):
+    if "config_error" in st.session_state:
+        st.error(st.session_state.config_error, icon="⚠️")
+
     col1, col2 = st.columns([5,1], vertical_alignment="bottom")
     with col1:
         st.text_input("Passivbot V6 path " + pbdir_ok, value=st.session_state.pbdir, key='input_pbdir')
@@ -213,17 +294,22 @@ if is_authenticted():
     if "just_logged_in" not in st.session_state:
         st.session_state.just_logged_in = True
         pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok = do_init()
-        # Redirect to Dashboards page
-        try:
-            st.switch_page("navi/info_dashboards.py")
-        except Exception as e:
-            st.error(f"Cannot redirect to Dashboards: {e}. Please navigate to Dashboards manually.")
+        # Redirect to Dashboards page only after login if configuration is complete
+        if is_configured():
+            try:
+                st.switch_page("navi/info_dashboards.py")
+            except Exception as e:
+                st.error(f"Cannot redirect to Dashboards: {e}. Please navigate to Dashboards manually.")
+                render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok)
+        else:
             render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok)
     else:
-        # Already logged in, show Welcome page
+        # Already logged in or navigated back, show Welcome page without redirect
         pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok = do_init()
         render_welcome(pbdir_ok, pbvenv_ok, pb7dir_ok, pb7venv_ok)
 else:
-    # Reset just_logged_in when not authenticated
+    # Reset just_logged_in and config_error when not authenticated
     if "just_logged_in" in st.session_state:
         del st.session_state.just_logged_in
+    if "config_error" in st.session_state:
+        del st.session_state.config_error
