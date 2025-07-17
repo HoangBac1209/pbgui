@@ -48,6 +48,9 @@ class Monitor():
             color = "green"
         else: color = "red"
         st.markdown(f'### Remote Server: :{color}[{server.name}] ({server.rtd}s) PBGui: {server.pbgui_version}')
+        if not server.mem or not server.disk or not server.swap:
+            st.warning("Server is not online or not responding", icon="⚠️")
+            return
         col_1, col_2 = st.columns([1,1])
         with col_1:
             mem_total = int(server.mem[0] / 1024 / 1024)
@@ -184,7 +187,7 @@ class Monitor():
                         v7_instances = st.session_state.v7_instances
                         version = v7_instances.fetch_instance_version(self.d_v7[row]['Name']) + 1
                         v7_instances.restart_instance(self.d_v7[row]['Name'])
-                        timeout = 120
+                        timeout = 180
                         with st.spinner(f'Restarting {self.d_v7[row]["Name"]}...'):
                             with st.empty():
                                 while version != v7_instances.fetch_instance_version(self.d_v7[row]['Name']):

@@ -49,6 +49,7 @@ class VPS:
         self.logfilename = None
         self.logfile = None
         self.logsize = 50
+        self.install_pb6 = True
 
     @property
     def hostname(self):
@@ -93,6 +94,8 @@ class VPS:
                 self.command = config["command"]
             if "command_text" in config:
                 self.command_text = config["command_text"]
+            if "install_pb6" in config:
+                self.install_pb6 = config["install_pb6"]
 
     def is_vps_in_hosts(self):
         # open /etc/hosts and check if the ip and hostname is in there
@@ -278,7 +281,8 @@ class VPS:
                 "firewall_ssh_port": self.firewall_ssh_port,
                 "firewall_ssh_ips": self.firewall_ssh_ips,
                 "command": self.command,
-                "command_text": self.command_text
+                "command_text": self.command_text,
+                "install_pb6": self.install_pb6
             }
             with open(file, "w", encoding='utf-8') as f:
                 json.dump(config, f, indent=4)
@@ -351,7 +355,8 @@ class VPSManager:
                 v.load(host)
                 self.vpss.append(v)
         # sort vpss by hostname
-        self.vpss.sort(key=lambda x: x.hostname)
+        if self.vpss:
+            self.vpss.sort(key=lambda x: x.hostname)
 
     def add_vps(self):
         return VPS()
@@ -408,6 +413,7 @@ class VPSManager:
             'swap_size': vps.swap,
             'bucket': vps.bucket,
             'coinmarketcap_api_key': vps.coinmarketcap_api_key,
+            'install_pb6': vps.install_pb6,
             'firewall': vps.firewall,
             'firewall_ssh_port': vps.firewall_ssh_port,
             'firewall_ssh_ips': vps.firewall_ssh_ips.split(','),

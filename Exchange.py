@@ -257,7 +257,6 @@ class Exchange:
             end = since + week
             while True:
                 trades = self.instance.fetch_my_trades(since=since, limit=limit, params = {'type': 'spot', "endTime": end})
-                print(trades)
                 if trades:
                     first_trade = trades[0]
                     last_trade = trades[-1]
@@ -325,6 +324,7 @@ class Exchange:
                         continue
                 cursor = transactions["result"]["nextPageCursor"]
                 positions = transactions["result"]["list"]
+                # print(positions)
                 if positions:
                     first_position = positions[0]
                     last_position = positions[-1]
@@ -338,13 +338,14 @@ class Exchange:
                 if since > now:
                     print(f'User:{self.user.name} Done')
                     break
+            # print(all_histories)
             for history in all_histories:
                 if history["type"] in ["TRADE","SETTLEMENT"]:
                     income = {}
                     income["symbol"] = history["symbol"]
                     income["timestamp"] = history["transactionTime"]
                     income["income"] = history["change"]
-                    income["uniqueid"] = history["tradeId"]
+                    income["uniqueid"] = history["id"]
                     all.append(income)
                 else: 
                     self.save_income_other(history, self.user.name)
@@ -369,7 +370,7 @@ class Exchange:
                     method="POST",
                     headers={"Content-Type": "application/json"},
                     body=json.dumps({"type": "userFunding", "user": self.user.wallet_address, "startTime": since, "endTime": end}),
-            )
+                    )
                 if fundings:
                     first_funding = fundings[0]
                     last_funding = fundings[-1]
@@ -390,13 +391,14 @@ class Exchange:
                 income["symbol"] = history["delta"]["coin"] + "USDC"
                 income["timestamp"] = history["time"]
                 income["income"] = history["delta"]["usdc"]
-                income["uniqueid"] = history["hash"]
+                income["uniqueid"] = history["time"] + "_" + history["delta"]["coin"]
                 all.append(income)
             since = since_trades
             end = end_trades
             all_histories = []
             while True:
                 trades = self.instance.fetch_my_trades(since=since, limit=limit, params = {"endTime": end})
+                # print(trades)
                 if trades:
                     first_trade = trades[0]
                     last_trade = trades[-1]
@@ -412,14 +414,15 @@ class Exchange:
                     print(f'User:{self.user.name} Done')
                     break
                 sleep(1)
+            # print(all_histories)
             for history in all_histories:
-                if history["side"] == "sell":
-                    income = {}
-                    income["symbol"] = history["info"]["coin"] + "USDC"
-                    income["timestamp"] = history["timestamp"]
-                    income["income"] = history["info"]["closedPnl"]
-                    income["uniqueid"] = history["info"]["tid"]
-                    all.append(income)
+                # if history["side"] == "sell":
+                income = {}
+                income["symbol"] = history["info"]["coin"] + "USDC"
+                income["timestamp"] = history["timestamp"]
+                income["income"] = float(history["info"]["closedPnl"]) - float(history["info"]["fee"])
+                income["uniqueid"] = history["info"]["tid"]
+                all.append(income)
         elif self.id == "kucoinfutures":
             day = 24 * 60 * 60 * 1000
             week = 7 * day
@@ -485,7 +488,8 @@ class Exchange:
             for history in all_histories:
                 if history["type"] in ["trade","fee"]:
                     income = {}
-                    income["symbol"] = history["symbol"][0:-5].replace("/", "").replace("-", "")
+                    # income["symbol"] = history["symbol"][0:-5].replace("/", "").replace("-", "")
+                    income["symbol"] = history["info"]["instId"][0:-5].replace("/", "").replace("-", "")
                     income["timestamp"] = history["timestamp"]
                     income["income"] = history["amount"]
                     income["uniqueid"] = history["id"]
@@ -503,6 +507,7 @@ class Exchange:
             end = since + week
             while True:
                 ledgers = self.instance.fetch_ledger(since=since, limit=limit, params = {"type": "swap", "endTime": end})
+                # print(ledgers)
                 if ledgers:
                     first_ledger = ledgers[0]
                     last_ledger = ledgers[-1]
@@ -518,12 +523,13 @@ class Exchange:
                     print(f'User:{self.user.name} Done')
                     break
             for history in all_histories:
-                if history["info"]["symbol"] and history["info"]["amount"] != "0":
+                # if history["info"]["symbol"] and history["info"]["amount"] != "0":
+                if history["info"]["symbol"]:
                     if history["type"] in ["trade","fee"]:
                         income = {}
                         income["symbol"] = history["info"]["symbol"]
                         income["timestamp"] = history["timestamp"]
-                        income["income"] = history["info"]["amount"]
+                        income["income"] = float(history["info"]["amount"]) + float(history["info"]["fee"])
                         income["uniqueid"] = history["info"]["billId"]
                         all.append(income)
                     else: 
@@ -995,7 +1001,56 @@ class Exchange:
             self.swap = eval(pb_config.get("exchanges", f'{self.id}.swap'))
         if not self.spot and not self.swap:
             self.fetch_symbols()
+    
+    def fetch_symbol_infos(self, symbol: str):
+        if not self.instance:
+            print("new connect")
+            self.connect()
+            self._markets = self.instance.load_markets()
+        # symbol = self.symbol_to_exchange_symbol(symbol, "swap")
+        if self.id == 'hyperliquid':
+            symbol = f'{symbol[0:-4]}/USDC:USDC'
+        else:
+            symbol = f'{symbol[0:-4]}/USDT:USDT'
+        # print(symbol)
+        if symbol not in self._markets:
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        symbol_info = self._markets[symbol]
+        print(symbol_info)
+        if symbol_info["limits"]["leverage"]["max"] is None:
+            lev = "unknown"
+        else:
+            lev = symbol_info["limits"]["leverage"]["max"]
+        contractSize = symbol_info["contractSize"]
+        if symbol_info["limits"]["amount"]["min"]:
+            min_amount = symbol_info["limits"]["amount"]["min"]
+        elif symbol_info["precision"]["amount"]:
+            min_amount = symbol_info["precision"]["amount"]
+            
+        min_qty = min_amount * contractSize
+        price = self.fetch_price(symbol, "swap")['last']
+        # print(f'Price for {symbol} is {price}')
+        min_price = min_qty * price
+        # min_cost = 0.0
+        if symbol_info["limits"]["cost"]["min"]:
+            min_cost = symbol_info["limits"]["cost"]["min"]
+        else:
+            min_cost = 0.0
+        if min_cost > min_price:
+            min_price = min_cost
+        return min_price, price, contractSize, min_amount, min_cost, lev
 
+    def calculate_balance_needed(self, symbols: list, twe: float, entry_initial_qty_pct: float):
+        balance_needed = 0.0
+        we = twe / len(symbols)
+        for symbol in symbols:
+            min_price = self.fetch_symbol_min_order_price(symbol)
+            balance_needed_symbol = min_price / we / entry_initial_qty_pct
+            balance_needed += balance_needed_symbol
+            # print(symbol, we, min_price, balance_needed_symbol)
+        return balance_needed
+
+            
 def main():
     print("Don't Run this Class from CLI")
     # exchange = Exchange("gateio", None)
@@ -1005,9 +1060,43 @@ def main():
     # exchange = Exchange("bitget", users.find_user("bitget_CPT"))
     # exchange.fetch_symbols()
     # print(exchange.fetch_copytrading_symbols())
-    # exchange = Exchange("hyperliquid", users.find_user("hl_manicpt"))
+    # exchange = Exchange("hyperliquid", users.find_user("hl_HYPErQuantum"))
     # print(exchange.fetch_prices(["DOGE/USDC:USDC", "WIF/USDC:USDC"], "swap"))
-    # exchange = Exchange("binance", users.find_user("binance_FORAGER"))
+    # exchange = Exchange("binance", users.find_user("binance_CPT"))
+    # exchange = Exchange("bybit", users.find_user("HYPErQuantum"))
+    # exchange = Exchange("hyperliquid", users.find_user("hl_mani05_DOGE"))
+    # exchange = Exchange("bitget", users.find_user("bitget_HYPErQuantum"))
+    # exchange = Exchange("okx", users.find_user("okx_MAINCPT"))
+    # symbols = ["BTCUSDT"]
+    # symbols = ["DOGEUSDT", "VETUSDT", "ICPUSDT", "INJUSDT"]
+    # exchange = Exchange("hyperliquid", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDC')
+    # exchange = Exchange("okx", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDT')
+    # exchange = Exchange("binance", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDT')
+    # exchange = Exchange("bybit", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDT')
+    # exchange = Exchange("bitget", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDT')
+    # exchange = Exchange("gateio", None)
+    # balance_needed = exchange.calculate_balance_needed(symbols, 12.0, 0.03215)
+    # print(f'Balance needed on {exchange.id} for {symbols} is {balance_needed:.2f} USDT')
+    # exchange.load_market()
+    # exchange.fetch_symbol_min_order_price("BTCUSDT")
+    # exchange.fetch_symbol_min_order_price("ETHUSDT")
+    # exchange.fetch_symbol_min_order_price("SOLUSDT")
+    # exchange.fetch_symbol_min_order_price("DOGEUSDT")
+    # save markets as json
+    # with open('binance_markets.json', 'w') as f:
+    #     json.dump(exchange._markets, f, indent=4)
+    
+
     # exchange.fetch_symbols()
     # print(exchange.fetch_copytrading_symbols())
     # exchange = Exchange("bybit", users.find_user("bybit_CPTV7HR"))
@@ -1028,7 +1117,7 @@ def main():
     # print(exchange.fetch_price("DOGE/USDC:USDC", "swap"))
     # exchange.fetch_symbols()
     # spot = exchange.fetch_spot()
-    # print(exchange.fetch_history())
+    # print(exchange.fetch_history(1749323083834))
     # print(exchange.fetch_balance("swap"))
     # print(spot)
 

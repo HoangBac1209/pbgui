@@ -12,13 +12,14 @@ import time
 import multiprocessing
 import pandas as pd
 from pbgui_func import PBGDIR, pb7dir, pb7venv, validateJSON, config_pretty_str, load_symbols_from_ini, error_popup, info_popup, get_navi_paths, replace_special_chars
+from pbgui_purefunc import load_ini, save_ini
 from PBCoinData import CoinData
 import uuid
 from Base import Base
 from Exchange import Exchange
-from Config import Config, ConfigV7
+from Config import Config, ConfigV7, BalanceCalculator
 from pathlib import Path, PurePath
-from shutil import rmtree
+from shutil import rmtree, copytree
 from RunV7 import V7Instance
 import OptimizeV7
 import datetime
@@ -963,6 +964,64 @@ class BacktestV7Result:
             st.error("No balance and equity data found")
 
 
+    # Create Drawdown Chart with plotly
+    def view_chart_drawdown(self):
+        if self.be is not None:
+            fig = go.Figure()
+
+            equity = self.be['equity']
+            # Calculate the drawdown: normalized equity from 1 to 0
+            max_equity = equity.cummax()
+            drawdown =  (equity - max_equity) / max_equity
+            normalized_drawdown = 1 + drawdown  # To get values from 1 down to 0
+
+            # Plot Drawdown
+            fig.add_trace(go.Scatter(
+                x=self.be['time'],
+                y=normalized_drawdown,
+                name='Drawdown',
+                line=dict(width=1.5)
+            ))
+
+            fig.update_layout(yaxis_title='Drawdown', height=800)
+            fig.update_xaxes(showgrid=True, griddash="dot")
+            name = PurePath(*self.result_path.parts[-3:-2])
+            formatted_time = self.time.strftime("%Y-%m-%d %H:%M:%S")
+            fig.update_layout(title_text=f'{name} {formatted_time}', title_x=0.5)
+            fig['data'][0]['showlegend'] = True
+            st.plotly_chart(fig, key=f"backtest_v7_{self.result_path}_drawdown")
+        else:
+            st.error("No balance and equity data found")
+
+    # Create Drawdown Chart with plotly
+    def view_chart_drawdown_btc(self):
+        if self.be is not None:
+            fig = go.Figure()
+
+            equity = self.be['equity_btc']
+            # Calculate the drawdown: normalized equity from 1 to 0
+            max_equity = equity.cummax()
+            drawdown =  (equity - max_equity) / max_equity
+            normalized_drawdown = 1 + drawdown  # To get values from 1 down to 0
+
+            # Plot Drawdown
+            fig.add_trace(go.Scatter(
+                x=self.be['time'],
+                y=normalized_drawdown,
+                name='Drawdown BTC',
+                line=dict(width=1.5)
+            ))
+
+            fig.update_layout(yaxis_title='Drawdown BTC', height=800)
+            fig.update_xaxes(showgrid=True, griddash="dot")
+            name = PurePath(*self.result_path.parts[-3:-2])
+            formatted_time = self.time.strftime("%Y-%m-%d %H:%M:%S")
+            fig.update_layout(title_text=f'{name} {formatted_time}', title_x=0.5)
+            fig['data'][0]['showlegend'] = True
+            st.plotly_chart(fig, key=f"backtest_v7_{self.result_path}_drawdown_btc")
+        else:
+            st.error("No balance and equity data found")
+
     # Create Symbol Chart with plotly
     def view_chart_symbol(self):
         if self.fills is not None:
@@ -1003,48 +1062,54 @@ class BacktestV7Result:
                 coin_or_symbol = "symbol" if "symbol" in self.fills else "coin"
                 self.fills['we'] = 1 / self.fills["balance"] * self.fills['psize'] * self.fills['pprice']
 
-                # Create pivot table
-                exposure_by_currency = self.fills.pivot_table(
-                    index='time',
-                    columns=coin_or_symbol,
-                    values='we',
-                    aggfunc='last'
-                ).fillna(0)
+                #write self.fills to csv
+                # self.fills.to_csv(f'{self.result_path}/fills_with_we.csv', index=False)
 
-                # Calculate total exposure and fill missing values
-                exposure_by_currency['twe'] = exposure_by_currency.sum(axis=1).ffill().fillna(0)
+                # Create pivot table
+                # Create separate pivot tables for long and short positions based on 'type' column
+                if 'type' in self.fills.columns:
+                    long_fills = self.fills[self.fills['type'].str.endswith('long')]
+                    short_fills = self.fills[self.fills['type'].str.endswith('short')]
+                    exposure_by_currency_long = long_fills.pivot_table(
+                        index='time',
+                        columns=coin_or_symbol,
+                        values='we',
+                        aggfunc='last'
+                    ).ffill()
+                    exposure_by_currency_short = short_fills.pivot_table(
+                        index='time',
+                        columns=coin_or_symbol,
+                        values='we',
+                        aggfunc='last'
+                    ).ffill()
+                else:
+                    exposure_by_currency_long = pd.DataFrame()
+                    exposure_by_currency_short = pd.DataFrame()
+
+                #write exposure_by_currency to csv
+                # exposure_by_currency.to_csv(f'{self.result_path}/exposure_by_currency_pivot.csv')
+
+                # Calculate total exposure and fill missing values with last value
+                exposure_by_currency_long['twe'] = exposure_by_currency_long.sum(axis=1).ffill()
+                exposure_by_currency_short['twe'] = exposure_by_currency_short.sum(axis=1).ffill()
+
+                #write exposure_by_currency to csv
+                # exposure_by_currency.to_csv(f'{self.result_path}/exposure_by_currency.csv')
 
                 # Fill missing time slots with a custom function
                 resolution = st.session_state[f"backtest_v7_{self.result_path}_resolution"]
-                # exposure_by_currency = exposure_by_currency.resample(f'{resolution}min').agg(lambda x: x.ffill().max() if not x.empty else 0)
-
-                # Ensure no unnecessary NaNs are left in the dataset initially
-                exposure_by_currency = exposure_by_currency.ffill()
-
-                # Resample and apply a vectorized function
-                exposure_by_currency = exposure_by_currency.resample(f'{resolution}min').max()
-
-                # Replace NaN values with 0 after resampling
-                exposure_by_currency.fillna(0, inplace=True)
-
-                # Ensure 'twe' is filled and retains maximum values too
-                # exposure_by_currency['twe'] = exposure_by_currency['twe'].resample(f'{resolution}min').agg(lambda x: x.ffill().max() if not x.empty else 0)
-
-                # Forward fill before resampling
-                exposure_by_currency['twe'] = exposure_by_currency['twe'].ffill()
-
-                # Resample and get the maximum value
-                exposure_by_currency['twe'] = exposure_by_currency['twe'].resample(f'{resolution}min').max()
-
-                # Replace NaN values with 0 after resampling
-                exposure_by_currency['twe'] = exposure_by_currency['twe'].fillna(0)
+                exposure_by_currency_long = exposure_by_currency_long.resample(f'{resolution}min').max().ffill().fillna(0)
+                exposure_by_currency_short = exposure_by_currency_short.resample(f'{resolution}min').max().ffill().fillna(0)
 
                 # Plot total exposure
-                fig.add_trace(go.Scatter(x=exposure_by_currency.index, y=exposure_by_currency['twe'], name="TWE"))
+                fig.add_trace(go.Scatter(x=exposure_by_currency_long.index, y=exposure_by_currency_long['twe'], name="Long TWE"))
+                fig.add_trace(go.Scatter(x=exposure_by_currency_short.index, y=exposure_by_currency_short['twe'], name="Short TWE"))
 
                 # Plot each coin's exposure
-                for coin in exposure_by_currency.columns[:-1]:  # Exclude 'twe' column
-                    fig.add_trace(go.Scatter(x=exposure_by_currency.index, y=exposure_by_currency[coin], name=f"{coin} WE"))
+                for coin in exposure_by_currency_long.columns[:-1]:  # Exclude 'twe' column
+                    fig.add_trace(go.Scatter(x=exposure_by_currency_long.index, y=exposure_by_currency_long[coin], name=f"{coin} Long WE"))
+                for coin in exposure_by_currency_short.columns[:-1]:  # Exclude 'twe' column
+                    fig.add_trace(go.Scatter(x=exposure_by_currency_short.index, y=exposure_by_currency_short[coin], name=f"{coin} Short WE"))
 
                 fig.update_layout(yaxis_title='Exposure', height=800)
                 fig.update_xaxes(showgrid=True, griddash="dot")
@@ -1055,7 +1120,13 @@ class BacktestV7Result:
 class ConfigV7Archives:
     def __init__(self):
         self.archives = []
+        self.my_archive = ""
+        self.my_archive_username = ""
+        self.my_archive_email = ""
+        self.my_archive_path = "pbgui/configs/pb7"
+        self.my_archive_access_token = ""
         self.load()
+        self.load_config()
 
     def load(self):
         p = str(Path(f'{PBGDIR}/data/archives/*/.git/config'))
@@ -1073,6 +1144,70 @@ class ConfigV7Archives:
                             "name": PurePath(file).parent.parent.name,
                             "path": PurePath(file).parent.parent
                         })
+
+    def setup(self):
+        if not self.archives:
+            st.warning("No archives found\n Please add your own github archive.")
+            return
+        # Init session states for keys
+        if "edit_my_archive" in st.session_state:
+            if st.session_state.edit_my_archive != self.my_archive:
+                self.my_archive = st.session_state.edit_my_archive
+        else:
+            st.session_state.edit_my_archive = self.my_archive
+        if "edit_my_archive_path" in st.session_state:
+            if st.session_state.edit_my_archive_path != self.my_archive_path:
+                self.my_archive_path = st.session_state.edit_my_archive_path
+        else:
+            st.session_state.edit_my_archive_path = self.my_archive_path
+        if "edit_my_archive_username" in st.session_state:
+            if st.session_state.edit_my_archive_username != self.my_archive_username:
+                self.my_archive_username = st.session_state.edit_my_archive_username
+        else:
+            st.session_state.edit_my_archive_username = self.my_archive_username
+        if "edit_my_archive_email" in st.session_state:
+            if st.session_state.edit_my_archive_email != self.my_archive_email:
+                self.my_archive_email = st.session_state.edit_my_archive_email
+        else:
+            st.session_state.edit_my_archive_email = self.my_archive_email
+        if "edit_my_archive_access_token" in st.session_state:
+            if st.session_state.edit_my_archive_access_token != self.my_archive_access_token:
+                self.my_archive_access_token = st.session_state.edit_my_archive_access_token
+        else:
+            st.session_state.edit_my_archive_access_token = self.my_archive_access_token
+        # Display Editor
+        col1, col2 = st.columns([1,1])
+        with col1:
+            options = [""] + [archive["name"] for archive in self.archives]        
+            st.selectbox("Select your own Archive", options=options, key="edit_my_archive", help=pbgui_help.my_archive)
+        with col2:
+            st.text_input("Archive Path", value=self.my_archive_path, key="edit_my_archive_path", help=pbgui_help.my_archive_path)
+        # Archive Username and Email
+        col1, col2 = st.columns([1,1])
+        with col1:
+            st.text_input("Archive Username", value=self.my_archive_username, key="edit_my_archive_username", help=pbgui_help.my_archive_username)
+        with col2:
+            st.text_input("Archive Email", value=self.my_archive_email, key="edit_my_archive_email", help=pbgui_help.my_archive_email)
+        # Archive Token
+        col1, col2 = st.columns([1,1])
+        with col1:
+            st.text_input("Archive Access Token", value=self.my_archive_access_token, type="password", key="edit_my_archive_access_token", help=pbgui_help.my_archive_access_token)
+        if st.button("Test"):
+            self.git_push_test()
+
+    def load_config(self):
+        self.my_archive = load_ini("config_archive", "my_archive")
+        self.my_archive_path = load_ini("config_archive", "my_archive_path")
+        self.my_archive_username = load_ini("config_archive", "my_archive_username")
+        self.my_archive_email = load_ini("config_archive", "my_archive_email")
+        self.my_archive_access_token = load_ini("config_archive", "my_archive_access_token")
+
+    def save_config(self):
+        save_ini("config_archive", "my_archive", self.my_archive)
+        save_ini("config_archive", "my_archive_path", self.my_archive_path)
+        save_ini("config_archive", "my_archive_username", self.my_archive_username)
+        save_ini("config_archive", "my_archive_email", self.my_archive_email)
+        save_ini("config_archive", "my_archive_access_token", self.my_archive_access_token)
 
     def list(self):
         if not self.archives:
@@ -1128,6 +1263,19 @@ class ConfigV7Archives:
         if path:
             rmtree(path, ignore_errors=True)
 
+    def add_config(self, path: str):
+        if path:
+            if Path(path).exists():
+                # create dest_name from path
+                dest_name = str(path).split("/pbgui/")[-1]
+                if self.my_archive_path:
+                    dest = Path(f'{PBGDIR}/data/archives/{self.my_archive}/{self.my_archive_path}/{dest_name}')
+                else:
+                    dest = Path(f'{PBGDIR}/data/archives/{self.my_archive}/{dest_name}')
+                # copy path to dest
+                copytree(path, dest, dirs_exist_ok=True)
+
+
     def add(self):
         if "edit_bt_v7_archive_name" not in st.session_state:
             st.session_state.edit_bt_v7_archive_name = ""
@@ -1173,6 +1321,119 @@ class ConfigV7Archives:
                 log = log + f"Error pulling {archive['name']}: {e.stderr}"
         if log:
             info_popup(log)
+    
+    def git_push_test(self):
+        if self.my_archive_access_token and self.my_archive:
+            archive = next((a for a in self.archives if a["name"] == self.my_archive), None)
+            if archive:
+                path = archive["path"]
+                url = archive["url"]
+                # add token to url
+                if url.startswith("http://"):
+                    url = url.replace("http://", f"http://{self.my_archive_access_token}@")
+                elif url.startswith("https://"):
+                    url = url.replace("https://", f"https://{self.my_archive_access_token}@")
+            else:
+                st.error(f"Archive '{self.my_archive}' not found.")
+                return
+            # Configure username and email
+            cmd = ["git", "-C", path, "config", "user.name", self.my_archive_username]
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error configuring username for {self.my_archive}: {e.stderr}")
+                return
+            cmd = ["git", "-C", path, "config", "user.email", self.my_archive_email]
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error configuring email for {self.my_archive}: {e.stderr}")
+                return
+            # Test push
+            cmd = ["git", "-C", path, "push", url, "--dry-run"]
+            print(cmd)
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+                log = result.stdout + "\n" + result.stderr
+                if result.returncode == 0:
+                    info_popup(log)
+                else:
+                    error_popup(log)
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error pushing to {self.my_archive}: {e.stderr}")
+        else:
+            st.error("Please enter a name, user and access token")
+
+    def git_push(self):
+        if self.my_archive_access_token and self.my_archive:
+            archive = next((a for a in self.archives if a["name"] == self.my_archive), None)
+            if archive:
+                path = archive["path"]
+                url = archive["url"]
+                # add token to url
+                if url.startswith("http://"):
+                    url = url.replace("http://", f"http://{self.my_archive_access_token}@")
+                elif url.startswith("https://"):
+                    url = url.replace("https://", f"https://{self.my_archive_access_token}@")
+            else:
+                st.error(f"Archive '{self.my_archive}' not found.")
+                return
+
+            # Init emtpy log
+            log = ""
+
+            # git pull before push
+            cmd = ["git", "-C", path, "pull"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+                log = log + f"Git pull changes\n"
+                log = log + result.stdout + "\n"
+                if result.stderr:
+                    log = log + result.stderr + "\n"
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error pulling {self.my_archive}: {e.stderr}")
+                return
+           
+            # add all files to git
+            cmd = ["git", "-C", path, "add", "-A"]
+            log = ""
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+                log = "Git add all files to archive\n"
+                log = log + result.stdout + "\n"
+                if result.stderr:
+                    log = log + result.stderr + "\n"
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error adding files to {self.my_archive}: {e.stderr}")
+                return
+
+            # commit changes
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cmd = ["git", "-C", path, "commit", "-m", f"Update {self.my_archive} at {current_time}"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+                log = log + "Git commit changes\n"
+                log = log + result.stdout + "\n"
+                if result.stderr:
+                    log = log + result.stderr + "\n"
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error committing to {self.my_archive}: {e.stderr}")
+                return
+
+            # push changes
+            cmd = ["git", "-C", path, "push", url]
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=True, text=True)
+                log = log + "Git push changes\n"
+                log = log + result.stdout + "\n"
+                if result.stderr:
+                    log = log + result.stderr + "\n"
+            except subprocess.CalledProcessError as e:
+                error_popup(f"Error pushing to {self.my_archive}: {e.stderr}")
+                return
+            if log:
+                info_popup(log)
+
 
 class BacktestV7Results:
 
@@ -1212,56 +1473,24 @@ class BacktestV7Results:
         # Remove results by filter
         if not self.filter == "":
             for result in self.results.copy():
-                target = result.config.backtest.base_dir.split('/')[-1]
-                if not fnmatch.fnmatch(target.lower(), self.filter.lower()):
+                # remove archive_path from result_path
+                result_path = str(result.result_path)
+                if result_path.startswith(f'{PBGDIR}/data/archives/'):
+                    # remove archives path
+                    result_path = result_path.replace(f'{PBGDIR}/data/archives/', '')
+                    result_path = result_path.split('/')
+                    result_path = '/'.join(result_path[1:])
+                else:
+                    # remove backtests path
+                    result_path = result_path.replace(f'{pb7dir()}/backtests/pbgui/', '')
+                # target = result.config.backtest.base_dir.split('/')[-1]
+                if not fnmatch.fnmatch(result_path.lower(), self.filter.lower()):
                     self.results.remove(result)
 
         st.text_input("Filter by Backtest Name", value="", help=pbgui_help.smart_filter, key="select_btv7_result_filter")
         if not "ed_key" in st.session_state:
             st.session_state.ed_key = 0
         ed_key = st.session_state.ed_key
-        if f'select_btv7_result_{ed_key}' in st.session_state:
-            ed = st.session_state[f'select_btv7_result_{ed_key}']
-            for row in ed["edited_rows"]:
-                if "Compare" in ed["edited_rows"][row]:
-                    if ed["edited_rows"][row]["Compare"]:
-                        self.add_compare(self.results[row])
-                    else:
-                        self.remove_compare(self.results[row])
-                if "Create Run" in ed["edited_rows"][row]:
-                    if ed["edited_rows"][row]["Create Run"]:
-                        st.session_state.edit_v7_instance = V7Instance()
-                        st.session_state.edit_v7_instance.config = self.results[row].config
-                        st.session_state.edit_v7_instance.user = st.session_state.edit_v7_instance.config.live.user
-                        st.switch_page(get_navi_paths()["V7_RUN"])
-                if "BT" in ed["edited_rows"][row]:
-                    if ed["edited_rows"][row]["BT"]:
-                        st.session_state.bt_v7 = BacktestV7Item(f'{self.results[row].result_path}/config.json')
-                        if "bt_v7_results" in st.session_state:
-                            del st.session_state.bt_v7_results
-                        if "config_v7_archives" in st.session_state:
-                            del st.session_state.config_v7_archives
-                        if "config_v7_config_archive" in st.session_state:
-                            del st.session_state.config_v7_config_archive
-                        st.rerun()
-                if "Optimize" in ed["edited_rows"][row]:
-                    if ed["edited_rows"][row]["Optimize"]:
-                        st.session_state.opt_v7 = OptimizeV7.OptimizeV7Item()
-                        st.session_state.opt_v7.config = self.results[row].config
-                        st.session_state.opt_v7.config.pbgui.starting_config = True
-                        st.session_state.opt_v7.name = self.results[row].config.backtest.base_dir.split('/')[-1]
-                        if "opt_v7_list" in st.session_state:
-                            del st.session_state.opt_v7_list
-                        if "opt_v7_queue" in st.session_state:
-                            del st.session_state.opt_v7_queue
-                        if "opt_v7_results" in st.session_state:    
-                            del st.session_state.opt_v7_results
-                        st.switch_page(get_navi_paths()["V7_OPTIMIZE"])
-                if "GridVis" in ed["edited_rows"][row]:
-                    if ed["edited_rows"][row]["GridVis"]:
-                        st.session_state.v7_grid_visualizer_config = self.results[row].config
-                        st.session_state.v7_grid_visualizer_config.pbgui.note = f'{self.results[row].config.backtest.base_dir.split("/")[-1]}' 
-                        st.switch_page(get_navi_paths()["V7_GRID_VISUALIZER"])
         if not self.results_d:
             for id, result in enumerate(self.results):
                 compare = False
@@ -1276,12 +1505,26 @@ class BacktestV7Results:
                     gain = result.result["gain"]
                 else:
                     gain = 0
+                # remove archive_path from result_path
+                result_path = str(result.result_path)
+                if result_path.startswith(f'{PBGDIR}/data/archives/'):
+                    # remove archives path
+                    result_path = result_path.replace(f'{PBGDIR}/data/archives/', '')
+                    result_path = result_path.split('/')
+                    result_path = '/'.join(result_path[1:])
+                else:
+                    # remove backtests path
+                    result_path = result_path.replace(f'{pb7dir()}/backtests/pbgui/', '')
                 self.results_d.append({
                     'Select': False,
                     'id': id,
-                    'Backtest Name': result.config.backtest.base_dir.split('/')[-1],
-                    'Exch.': str(result.result_path).split('/')[-2],
-                    'Result Time': result.time.strftime("%Y-%m-%d %H:%M:%S") if result.time else '',
+                    'View': False,
+                    'WE': False,
+                    'Plot': False,
+                    'Fills': False,
+                    'Backtest Name': result_path,
+                    'Exch.': result.config.backtest.exchanges,
+                    'Result Time': result.time,
                     'ADG': f"{result.adg:.4f}",
                     'Gain': f"{gain:.2f}",
                     'Drawdown Worst': f"{result.drawdown_worst:.4f}",
@@ -1291,30 +1534,17 @@ class BacktestV7Results:
                     'Final Balance BTC': result.final_balance_btc,
                     'TWE': f"{result.config.bot.long.total_wallet_exposure_limit:.2f} / {result.config.bot.short.total_wallet_exposure_limit:.2f}",
                     'POS': f"{result.config.bot.long.n_positions:.2f} / {result.config.bot.short.n_positions:.2f}",
-                    'View': False,
-                    'WE': False,
-                    'Plot': False,
-                    'Fills': False,
-                    'Create Run': False,
-                    'BT': False,
-                    'Optimize': False,
-                    'GridVis': False,
-                    # 'Delete': False,
-                    'Compare': compare,  # Add Compare field
                 })
         column_config = {
             "id": None,
             'Select': st.column_config.CheckboxColumn(label="Select"),
-            'View': st.column_config.CheckboxColumn(label="Results"),
+            'View': st.column_config.CheckboxColumn(label="View"),
             'WE': st.column_config.CheckboxColumn(label="WE"),
             'Plot': st.column_config.CheckboxColumn(label="BE Plot"),
             'Fills': st.column_config.CheckboxColumn(label="Fills"),
-            'Create Run': st.column_config.CheckboxColumn(label="Run"),
-            'BT': st.column_config.CheckboxColumn(label="BT"),
-            'Optimize': st.column_config.CheckboxColumn(label="Opt"),
-            # 'Delete': st.column_config.CheckboxColumn(label="Del"),
-            'Compare': st.column_config.CheckboxColumn(label="Comp"),
             'ADG': st.column_config.NumberColumn(format="%.4f"),
+            'Result Time': st.column_config.DatetimeColumn(label="Result Time", format="YYYY-MM-DD HH:mm:ss"),
+            'Gain': st.column_config.NumberColumn(label="Gain", format="%.2f"),
             'Drawdown Worst': st.column_config.NumberColumn(label="Worst DD", format="%.4f"),
             'Sharpe Ratio': st.column_config.NumberColumn(label="Sharpe", format="%.4f"),
             'Starting Balance': st.column_config.NumberColumn(label="Start B."),
@@ -1335,8 +1565,10 @@ class BacktestV7Results:
                         self.results[row].load_fills()
                         self.results[row].load_be()
                         self.results[row].view_chart_be()
+                        self.results[row].view_chart_drawdown()
                         if self.results[row].config.backtest.use_btc_collateral:
                             self.results[row].view_chart_be_btc()
+                            self.results[row].view_chart_drawdown_btc()
                         self.results[row].view_chart_symbol()
                         if "WE" in ed["edited_rows"][row]:
                             if ed["edited_rows"][row]["WE"]:
@@ -1349,15 +1581,134 @@ class BacktestV7Results:
                     if ed["edited_rows"][row]["Fills"]:
                         self.results[row].view_fills()
 
-    def backtest_selected_results(self):
+    def add_to_compare(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    self.add_compare(self.results[row])
+
+    def grid_visualizer(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        if selected_count > 1:
+            error_popup("Please select only one Backtest to calculate balance")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    st.session_state.v7_grid_visualizer_config = self.results[row].config
+                    st.session_state.v7_grid_visualizer_config.pbgui.note = f'{self.results[row].config.backtest.base_dir.split("/")[-1]}' 
+                    st.switch_page(get_navi_paths()["V7_GRID_VISUALIZER"])
+
+    def optimize_from_result(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        if selected_count > 1:
+            error_popup("Please select only one Backtest to calculate balance")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    st.session_state.opt_v7 = OptimizeV7.OptimizeV7Item()
+                    st.session_state.opt_v7.config = self.results[row].config
+                    st.session_state.opt_v7.config.pbgui.starting_config = True
+                    st.session_state.opt_v7.name = self.results[row].config.backtest.base_dir.split('/')[-1]
+                    if "opt_v7_list" in st.session_state:
+                        del st.session_state.opt_v7_list
+                    if "opt_v7_queue" in st.session_state:
+                        del st.session_state.opt_v7_queue
+                    if "opt_v7_results" in st.session_state:    
+                        del st.session_state.opt_v7_results
+                    if "opt_v7_pareto" in st.session_state:
+                        del st.session_state.opt_v7_pareto
+                    # if "limits_data" in st.session_state:
+                    #     del st.session_state.limits_data
+                    st.switch_page(get_navi_paths()["V7_OPTIMIZE"])
+
+    def add_to_run(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        if selected_count > 1:
+            error_popup("Please select only one Backtest to calculate balance")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    st.session_state.edit_v7_instance = V7Instance()
+                    st.session_state.edit_v7_instance.config = self.results[row].config
+                    st.session_state.edit_v7_instance.user = st.session_state.edit_v7_instance.config.live.user
+                    st.switch_page(get_navi_paths()["V7_RUN"])
+
+    def add_to_config_archive(self):
         ed_key = st.session_state.ed_key
         ed = st.session_state[f'select_btv7_result_{ed_key}']
         for row in ed["edited_rows"]:
             if "Select" in ed["edited_rows"][row]:
                 if ed["edited_rows"][row]["Select"]:
-                    bt_v7 = BacktestV7Item(f'{self.results[row].result_path}/config.json')
-                    bt_v7.save_queue()
+                    ConfigV7Archives().add_config(self.results[row].result_path)
+        info_popup(f"Selected Backtests added to config archive")
+
+    def backtest_selected_results(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    if selected_count == 1:
+                        st.session_state.bt_v7 = BacktestV7Item(f'{self.results[row].result_path}/config.json')
+                        if "bt_v7_results" in st.session_state:
+                            del st.session_state.bt_v7_results
+                        if "config_v7_config_archive" in st.session_state:
+                            del st.session_state.config_v7_config_archive
+                        st.rerun()
+                    else:                        
+                        bt_v7 = BacktestV7Item(f'{self.results[row].result_path}/config.json')
+                        bt_v7.save_queue()
         info_popup(f"Selected Backtests added to queue")
+    
+    def calculate_balance(self):
+        ed_key = st.session_state.ed_key
+        ed = st.session_state[f'select_btv7_result_{ed_key}']
+        # Get number of selected results
+        selected_count = sum(1 for row in ed["edited_rows"] if "Select" in ed["edited_rows"][row] and ed["edited_rows"][row]["Select"])
+        if selected_count == 0:
+            error_popup("No Backtests selected")
+            return
+        if selected_count > 1:
+            error_popup("Please select only one Backtest to calculate balance")
+            return
+        for row in ed["edited_rows"]:
+            if "Select" in ed["edited_rows"][row]:
+                if ed["edited_rows"][row]["Select"]:
+                    st.session_state.balance_calc = BalanceCalculator(f'{self.results[row].result_path}/config.json')
+                    st.switch_page(get_navi_paths()["V7_BALANCE_CALC"])
 
     def remove_selected_results(self):
         ed_key = st.session_state.ed_key
@@ -1394,6 +1745,12 @@ class BacktestV7Results:
         self.compare_fig.update_layout(title_text="Compare Results", title_x=0.5)
         self.compare_fig.update_layout(yaxis_title='Balance', height=800)
         self.compare_fig.update_xaxes(showgrid=True, griddash="dot")
+        self.compare_fig_btc = go.Figure()
+        self.compare_fig_btc.update_layout(yaxis_title='Balance')
+        self.compare_fig_btc.update_layout(title_text="Compare Results BTC", title_x=0.5)
+        self.compare_fig_btc.update_layout(yaxis_title='Balance', height=800)
+        self.compare_fig_btc.update_xaxes(showgrid=True, griddash="dot")
+        view_btc = False
         if st.session_state.btv7_compare_results:
             if st.button("Clear Compare"):
                 st.session_state.btv7_compare_results = []
@@ -1405,8 +1762,15 @@ class BacktestV7Results:
                     formatted_time = result.time.strftime("%Y-%m-%d %H:%M:%S")
                     self.compare_fig.add_trace(go.Scatter(x=result.be['time'], y=result.be['equity'], name=f"{name} {formatted_time} equity", line=dict(width=0.75)))
                     self.compare_fig.add_trace(go.Scatter(x=result.be['time'], y=result.be['balance'], name=f"{name} {formatted_time} balance", line=dict(width=2.5)))
-            self.compare_fig.update_yaxes(tickformat=".2f")
+                    if result.config.backtest.use_btc_collateral:
+                        name = PurePath(*result.result_path.parts[-3:-2])
+                        formatted_time = result.time.strftime("%Y-%m-%d %H:%M:%S")
+                        self.compare_fig_btc.add_trace(go.Scatter(x=result.be['time'], y=result.be['equity_btc'], name=f"{name} {formatted_time} equity_btc", line=dict(width=0.75)))
+                        self.compare_fig_btc.add_trace(go.Scatter(x=result.be['time'], y=result.be['balance_btc'], name=f"{name} {formatted_time} balance_btc", line=dict(width=2.5)))
+                        view_btc = True
             st.plotly_chart(self.compare_fig, key=f"backtest_v7_compare_be")
+            if view_btc:
+                st.plotly_chart(self.compare_fig_btc, key=f"backtest_v7_compare_be_btc")
 
 class BacktestsV7:
     def __init__(self):
@@ -1457,7 +1821,7 @@ class BacktestsV7:
         column_config = {
             "id": None,
             "edit": st.column_config.CheckboxColumn(label="Edit"),
-            "Date": st.column_config.DateColumn(format="YYYY-MM-DD HH:mm:ss"),
+            "Date": st.column_config.DatetimeColumn(label="Date", format="YYYY-MM-DD HH:mm:ss"),
             "view": st.column_config.CheckboxColumn(label="View Results"),
             "delete": st.column_config.CheckboxColumn(label="Delete"),
             "delete_results": st.column_config.CheckboxColumn(label="Delete BT and Results"),
