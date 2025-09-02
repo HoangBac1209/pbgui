@@ -216,7 +216,7 @@ class DynamicIgnore():
             self.coindata.list_symbols()
         # create list of self.coindata.ignored_coins + self.ignored_coins_long + self.ignored_coins_short
         ignored_coins = list(set(self.coindata.ignored_coins + self.ignored_coins_long + self.ignored_coins_short))
-        if not self.ignored_coins and self.ignored_coins != ignored_coins:
+        if not self.ignored_coins or sorted(self.ignored_coins) != sorted(ignored_coins):
             removed_coins = set(self.ignored_coins) - set(self.coindata.ignored_coins)
             removed_coins = [*removed_coins]
             removed_coins.sort()
@@ -227,7 +227,7 @@ class DynamicIgnore():
             self.ignored_coins = self.coindata.ignored_coins
         # create list of self.coindata.approved_coins + self.approved_coins_long + self.approved_coins_short
         approved_coins = list(set(self.coindata.approved_coins + self.approved_coins_long + self.approved_coins_short))
-        if not self.approved_coins and self.approved_coins != approved_coins:
+        if not self.approved_coins or sorted(self.approved_coins) != sorted(approved_coins):
             removed_coins = set(self.approved_coins) - set(self.coindata.approved_coins)
             removed_coins = [*removed_coins]
             removed_coins.sort()
@@ -1603,9 +1603,11 @@ def main():
         print(f'{datetime.now().isoformat(sep=" ", timespec="seconds")} Error: PBRun already started')
         exit(1)
     run.save_pid()
-    run.watch_v7()
-    run.watch_multi()
-    run.watch_single()
+    if run.pb7dir:
+        run.watch_v7()
+    if run.pbdir:
+        run.watch_multi()
+        run.watch_single()
     count = 0
     while True:
         try:
@@ -1616,24 +1618,28 @@ def main():
                     sys.stderr = TextIOWrapper(open(logfile,"ab",0), write_through=True)
             run.has_activate()
             run.has_update_status()
-            for run_v7 in run.run_v7:
-                run_v7.watch()
-                run_v7.watch_dynamic()
-                run_v7.monitor.watch_log()
-            for run_multi in run.run_multi:
-                run_multi.watch()
-                run_multi.watch_dynamic()
-                run_multi.monitor.watch_log()
-            for run_single in run.run_single:
-                run_single.watch()
-                run_single.monitor.watch_log()
-            if count%2 == 0:
+            if run.pb7dir:
                 for run_v7 in run.run_v7:
-                    run_v7.clean_log()
+                    run_v7.watch()
+                    run_v7.watch_dynamic()
+                    run_v7.monitor.watch_log()
+            if run.pbdir:
                 for run_multi in run.run_multi:
-                    run_multi.clean_log()
+                    run_multi.watch()
+                    run_multi.watch_dynamic()
+                    run_multi.monitor.watch_log()
                 for run_single in run.run_single:
-                    run_single.clean_log()
+                    run_single.watch()
+                    run_single.monitor.watch_log()
+            if count%2 == 0:
+                if run.pb7dir:
+                    for run_v7 in run.run_v7:
+                        run_v7.clean_log()
+                if run.pbdir:
+                    for run_multi in run.run_multi:
+                        run_multi.clean_log()
+                    for run_single in run.run_single:
+                        run_single.clean_log()
             sleep(5)
             count += 1
         except Exception as e:
